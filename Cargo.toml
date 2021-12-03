@@ -7,3 +7,5 @@ edition = "2018"
 
 [dependencies]
 rusqlite = "0.26.1"
+fallible-streaming-iterator = "0.1"
+md5 = "0.7.0"
