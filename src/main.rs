@@ -3,18 +3,24 @@ use rusqlite::{self};
 use std::io::prelude::*;
 use std::iter::Iterator;
 
-struct RQTable {
+pub struct RQTable {
     file_path: String,
     table_name: String,
 }
 
 impl RQTable {
-    fn new(file_path: String) -> Self {
-        let table_name = format!("{:x}", md5::compute(&file_path));
+    pub fn new(file_path: String) -> Self {
+        let table_name = format!("t_{:x}", md5::compute(&file_path));
         Self {
             file_path,
             table_name,
         }
+    }
+
+    fn check_header(&self, header_cols: &Vec<&str>) -> bool {
+        header_cols
+            .iter()
+            .any(|h| h.trim().chars().any(|c| c == ' ' || c == '\n'))
     }
 
     fn create_table(&self, conn: &rusqlite::Connection, header: &str) {
@@ -23,7 +29,13 @@ impl RQTable {
             "CREATE TABLE {} (id INTEGER PRIMARY KEY",
             self.table_name
         ));
-        for header_col in header.split(',') {
+
+        let header_cols = header.split(',').collect();
+        if self.check_header(&header_cols) {
+            panic!("Invalid header");
+        }
+
+        for header_col in header_cols {
             create_query.push_str(&format!(", {} TEXT NOT NULL", header_col));
         }
         create_query.push(')');
