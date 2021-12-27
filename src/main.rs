@@ -74,7 +74,6 @@ impl RQTable {
                 .map(|s: &str| s.trim_matches(|c: char| c == '"' || c == '\'').trim())
                 .zip(last.iter())
                 .map(|(c, l)| {
-                    println!("{}", c);
                     let cn = if c == "Null" {
                         RQType::Null
                     } else if c.parse::<i64>().is_ok() {
@@ -90,11 +89,11 @@ impl RQTable {
                         RQType::Integer => match cn {
                             RQType::Text => RQType::Text,
                             RQType::Real => RQType::Real,
-                            r => r,
+                            _ => RQType::Integer,
                         },
                         RQType::Real => match cn {
                             RQType::Text => RQType::Text,
-                            r => r,
+                            _ => RQType::Real,
                         },
                         RQType::Null => cn,
                         RQType::Blob => RQType::Blob,
@@ -115,15 +114,6 @@ impl RQTable {
         });
 
         println!("Result: {:#?}", result);
-
-        // for line in lines_iter {
-        // match line {
-        // Ok(value) => if !value.is_empty() {
-        // let value.split(',')
-        // },
-        // _ => {}
-        // }
-        // }
     }
 
     fn create_table(&self, conn: &rusqlite::Connection, header: &str) {
