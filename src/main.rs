@@ -3,9 +3,35 @@ use rusqlite::{self};
 use std::io::prelude::*;
 use std::iter::Iterator;
 
+#[derive(Debug)]
+pub enum RQType {
+    Null,
+    Integer,
+    Real,
+    Text,
+    Blob,
+}
+
+#[derive(Debug)]
+pub struct RQColumn {
+    column_name: String,
+    column_type: RQType,
+}
+
+impl RQColumn {
+    pub fn new(column_name: String, column_type: RQType) -> Self {
+        RQColumn {
+            column_name,
+            column_type,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct RQTable {
     file_path: String,
     table_name: String,
+    table_columns: Option<Vec<RQColumn>>,
 }
 
 impl RQTable {
@@ -14,6 +40,7 @@ impl RQTable {
         Self {
             file_path,
             table_name,
+            table_columns: None,
         }
     }
 
@@ -21,6 +48,82 @@ impl RQTable {
         header_cols
             .iter()
             .any(|h| h.trim().chars().any(|c| c == ' ' || c == '\n'))
+    }
+
+    fn infer_columns(&self) {
+        let file = std::fs::File::open(self.file_path.to_string()).unwrap();
+        let reader = std::io::BufReader::new(file);
+
+        let mut lines_iter = reader.lines();
+        let header: Vec<RQColumn> = lines_iter
+            .next()
+            .unwrap()
+            .unwrap()
+            .split(',')
+            .map(|c| RQColumn {
+                column_name: String::from(c),
+                column_type: RQType::Null,
+            })
+            .collect();
+
+        let result = lines_iter.fold(header, |last, current| {
+            let cc: Vec<RQColumn> = current
+                .unwrap()
+                .trim()
+                .split(',')
+                .map(|s: &str| s.trim_matches(|c: char| c == '"' || c == '\'').trim())
+                .zip(last.iter())
+                .map(|(c, l)| {
+                    println!("{}", c);
+                    let cn = if c == "Null" {
+                        RQType::Null
+                    } else if c.parse::<i64>().is_ok() {
+                        RQType::Integer
+                    } else if c.parse::<f64>().is_ok() {
+                        RQType::Real
+                    } else {
+                        RQType::Text
+                    };
+
+                    let column_type = match &l.column_type {
+                        RQType::Text => RQType::Text,
+                        RQType::Integer => match cn {
+                            RQType::Text => RQType::Text,
+                            RQType::Real => RQType::Real,
+                            r => r,
+                        },
+                        RQType::Real => match cn {
+                            RQType::Text => RQType::Text,
+                            r => r,
+                        },
+                        RQType::Null => cn,
+                        RQType::Blob => RQType::Blob,
+                    };
+
+                    RQColumn {
+                        column_name: String::from(&l.column_name),
+                        column_type: column_type,
+                    }
+                })
+                .collect();
+
+            if cc.len() < last.len() {
+                last
+            } else {
+                cc
+            }
+        });
+
+        println!("Result: {:#?}", result);
+
+        // for line in lines_iter {
+        // match line {
+        // Ok(value) => if !value.is_empty() {
+        // let value.split(',')
+        // },
+        // _ => {}
+        // }
+        // }
     }
 
     fn create_table(&self, conn: &rusqlite::Connection, header: &str) {
@@ -50,6 +153,7 @@ impl RQTable {
         let header = lines_iter.next().unwrap().unwrap();
 
         self.create_table(&conn, &header);
+        self.infer_columns();
 
         for line in lines_iter {
             match line {
@@ -110,7 +214,7 @@ impl RQDatabase {
                 .split_whitespace()
                 .fold(("", Vec::new()), |(last, mut result), current| {
                     match last {
-                        "from" => {
+                        "from" | "join" => {
                             result.push(current);
                         }
                         _ => {}
