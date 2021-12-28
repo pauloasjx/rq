@@ -1,5 +1,6 @@
 use fallible_streaming_iterator::FallibleStreamingIterator;
 use rusqlite::{self};
+use std::fmt;
 use std::io::prelude::*;
 use std::iter::Iterator;
 
@@ -10,6 +11,21 @@ pub enum RQType {
     Real,
     Text,
     Blob,
+}
+
+impl fmt::Display for RQType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                RQType::Null | RQType::Text => "TEXT",
+                RQType::Integer => "INTEGER",
+                RQType::Real => "REAL",
+                RQType::Blob => "BLOB",
+            }
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -31,7 +47,7 @@ impl RQColumn {
 pub struct RQTable {
     file_path: String,
     table_name: String,
-    table_columns: Option<Vec<RQColumn>>,
+    table_columns: Vec<RQColumn>,
 }
 
 impl RQTable {
@@ -40,7 +56,7 @@ impl RQTable {
         Self {
             file_path,
             table_name,
-            table_columns: None,
+            table_columns: vec![],
         }
     }
 
@@ -50,7 +66,7 @@ impl RQTable {
             .any(|h| h.trim().chars().any(|c| c == ' ' || c == '\n'))
     }
 
-    fn infer_columns(&self) {
+    fn infer_columns(&mut self) {
         let file = std::fs::File::open(self.file_path.to_string()).unwrap();
         let reader = std::io::BufReader::new(file);
 
@@ -113,37 +129,40 @@ impl RQTable {
             }
         });
 
-        println!("Result: {:#?}", result);
+        self.table_columns = result;
     }
 
-    fn create_table(&self, conn: &rusqlite::Connection, header: &str) {
+    fn create_table(&self, conn: &rusqlite::Connection) {
         let mut create_query = String::new();
         create_query.push_str(&format!(
             "CREATE TABLE {} (id INTEGER PRIMARY KEY",
             self.table_name
         ));
 
-        let header_cols = header.split(',').collect();
-        if self.check_header(&header_cols) {
-            panic!("Invalid header");
-        }
+        // let header_cols = header.split(',').collect();
+        // if self.check_header(&header_cols) {
+        // panic!("Invalid header");
+        // }
 
-        for header_col in header_cols {
-            create_query.push_str(&format!(", {} TEXT NOT NULL", header_col));
+        for table_column in &self.table_columns {
+            create_query.push_str(&format!(
+                ", {} {} NOT NULL",
+                table_column.column_name, table_column.column_type
+            ));
         }
         create_query.push(')');
         conn.execute(&create_query, []).unwrap();
     }
 
-    fn build_table(&self, conn: &rusqlite::Connection) {
+    fn build_table(&mut self, conn: &rusqlite::Connection) {
         let file = std::fs::File::open(self.file_path.to_string()).unwrap();
         let reader = std::io::BufReader::new(file);
 
+        self.infer_columns();
+        self.create_table(&conn);
+
         let mut lines_iter = reader.lines();
         let header = lines_iter.next().unwrap().unwrap();
-
-        self.create_table(&conn, &header);
-        self.infer_columns();
 
         for line in lines_iter {
             match line {
@@ -189,11 +208,12 @@ struct RQDatabase {
 impl RQDatabase {
     fn from_query(conn: rusqlite::Connection, query: &str) -> Self {
         let db_files = Self::find_tables(query);
-        let tables = db_files
+        let mut tables = db_files
             .iter()
             .map(|t| RQTable::new(t.to_string()))
             .collect::<Vec<RQTable>>();
-        tables.iter().for_each(|t| t.build_table(&conn));
+
+        tables.iter_mut().for_each(|t| t.build_table(&conn));
 
         RQDatabase { conn, tables }
     }
@@ -238,6 +258,9 @@ impl RQDatabase {
                             print!("\"{}\"\t", value);
                         }
                         rusqlite::types::Value::Integer(value) => {
+                            print!("{}\t", value);
+                        }
+                        rusqlite::types::Value::Real(value) => {
                             print!("{}\t", value);
                         }
                         otherwise => {
