@@ -144,9 +144,11 @@ impl RQTable {
         // panic!("Invalid header");
         // }
 
+        // println!("{:#?}", self.table_columns);
+
         for table_column in &self.table_columns {
             create_query.push_str(&format!(
-                ", {} {} NOT NULL",
+                ", \"{}\" {} NOT NULL",
                 table_column.column_name, table_column.column_type
             ));
         }
@@ -181,7 +183,7 @@ impl RQTable {
         insert_query.push_str(&format!("INSERT INTO {} (", self.table_name));
         let header_split: Vec<&str> = header.split(',').collect();
         for (header_pos, header_col) in header_split.iter().enumerate() {
-            insert_query.push_str(header_col);
+            insert_query.push_str(&format!("\"{}\"", header_col));
             if header_pos < header_split.len() - 1 {
                 insert_query.push_str(",");
             }
@@ -189,12 +191,13 @@ impl RQTable {
         insert_query.push_str(") VALUES (");
         let row_split: Vec<&str> = row.split(',').collect();
         for (row_pos, row_col) in row_split.iter().enumerate() {
-            insert_query.push_str(row_col);
+            insert_query.push_str(&format!("\"{}\"", row_col.replace("\"", "'")));
             if row_pos < row_split.len() - 1 {
                 insert_query.push_str(",");
             }
         }
         insert_query.push_str(");");
+        println!("{}", insert_query);
         conn.execute(&insert_query, []).unwrap();
         ()
     }
