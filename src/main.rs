@@ -60,7 +60,7 @@ impl RQTable {
         }
     }
 
-    fn check_header(&self, header_cols: &Vec<&str>) -> bool {
+    fn check_header(&self, header_cols: &[&str]) -> bool {
         header_cols
             .iter()
             .any(|h| h.trim().chars().any(|c| c == ' ' || c == '\n'))
@@ -117,7 +117,7 @@ impl RQTable {
 
                     RQColumn {
                         column_name: String::from(&l.column_name),
-                        column_type: column_type,
+                        column_type,
                     }
                 })
                 .collect();
@@ -161,19 +161,14 @@ impl RQTable {
         let reader = std::io::BufReader::new(file);
 
         self.infer_columns();
-        self.create_table(&conn);
+        self.create_table(conn);
 
         let mut lines_iter = reader.lines();
         let header = lines_iter.next().unwrap().unwrap();
 
-        for line in lines_iter {
-            match line {
-                Ok(value) => {
-                    if value != "".to_string() {
-                        self.insert_row(&conn, &header, value);
-                    }
-                }
-                _ => {}
+        for line in lines_iter.flatten() {
+            if line != *"" {
+                self.insert_row(conn, &header, line);
             }
         }
     }
@@ -185,7 +180,7 @@ impl RQTable {
         for (header_pos, header_col) in header_split.iter().enumerate() {
             insert_query.push_str(&format!("\"{}\"", header_col));
             if header_pos < header_split.len() - 1 {
-                insert_query.push_str(",");
+                insert_query.push(',');
             }
         }
         insert_query.push_str(") VALUES (");
@@ -193,13 +188,12 @@ impl RQTable {
         for (row_pos, row_col) in row_split.iter().enumerate() {
             insert_query.push_str(&format!("\"{}\"", row_col.replace("\"", "'")));
             if row_pos < row_split.len() - 1 {
-                insert_query.push_str(",");
+                insert_query.push(',');
             }
         }
         insert_query.push_str(");");
         println!("{}", insert_query);
         conn.execute(&insert_query, []).unwrap();
-        ()
     }
 }
 
@@ -248,7 +242,7 @@ impl RQDatabase {
         for col in stmt.column_names() {
             print!("{}\t", col);
         }
-        print!("\n");
+        println!();
 
         let ncols = stmt.column_count();
         stmt.query([])
@@ -271,14 +265,14 @@ impl RQDatabase {
                         }
                     }
                 });
-                print!("\n")
+                println!()
             })
             .unwrap();
     }
 }
 
 fn usage() {
-    print!("Usage ./rq <query>\n");
+    println!("Usage ./rq <query>");
 }
 
 fn main() {
@@ -292,5 +286,5 @@ fn main() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
 
     let database = RQDatabase::from_query(conn, query);
-    database.run_query(&query);
+    database.run_query(query);
 }
