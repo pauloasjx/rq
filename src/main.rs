@@ -3,6 +3,7 @@ use rusqlite::{self};
 use std::fmt;
 use std::io::prelude::*;
 use std::iter::Iterator;
+use std::time::Instant;
 
 #[derive(Debug)]
 pub enum RQType {
@@ -153,24 +154,30 @@ impl RQTable {
             ));
         }
         create_query.push(')');
+        // println!("{}", create_query);
         conn.execute(&create_query, []).unwrap();
     }
 
     fn build_table(&mut self, conn: &rusqlite::Connection) {
+        let start = Instant::now();
+        println!("Start: {:?}", start.elapsed());
+        self.infer_columns();
+        println!("Infer: {:?}", start.elapsed());
+        self.create_table(conn);
+        self.populate(conn);
+        println!("Insert: {:?}", start.elapsed());
+    }
+
+    fn populate(&mut self, conn: &rusqlite::Connection) {
         let file = std::fs::File::open(self.file_path.to_string()).unwrap();
         let reader = std::io::BufReader::new(file);
-
-        self.infer_columns();
-        self.create_table(conn);
-
         let mut lines_iter = reader.lines();
         let header = lines_iter.next().unwrap().unwrap();
-
+        conn.execute("BEGIN TRANSACTION;", []).unwrap();
         for line in lines_iter.flatten() {
-            if line != *"" {
-                self.insert_row(conn, &header, line);
-            }
+            self.insert_row(conn, &header, line);
         }
+        conn.execute("COMMIT;", []).unwrap();
     }
 
     fn insert_row(&self, conn: &rusqlite::Connection, header: &str, row: String) {
@@ -178,7 +185,7 @@ impl RQTable {
         insert_query.push_str(&format!("INSERT INTO {} (", self.table_name));
         let header_split: Vec<&str> = header.split(',').collect();
         for (header_pos, header_col) in header_split.iter().enumerate() {
-            insert_query.push_str(&format!("\"{}\"", header_col));
+            insert_query.push_str(&format!("\"{}\"", header_col.replace("\"", "\"\"")));
             if header_pos < header_split.len() - 1 {
                 insert_query.push(',');
             }
@@ -186,13 +193,13 @@ impl RQTable {
         insert_query.push_str(") VALUES (");
         let row_split: Vec<&str> = row.split(',').collect();
         for (row_pos, row_col) in row_split.iter().enumerate() {
-            insert_query.push_str(&format!("\"{}\"", row_col.replace("\"", "'")));
+            insert_query.push_str(&format!("\"{}\"", row_col.replace("\"", "\"\"")));
             if row_pos < row_split.len() - 1 {
                 insert_query.push(',');
             }
         }
         insert_query.push_str(");");
-        println!("{}", insert_query);
+        // println!("{}", insert_query);
         conn.execute(&insert_query, []).unwrap();
     }
 }
@@ -240,7 +247,7 @@ impl RQDatabase {
 
         let mut stmt = self.conn.prepare(&result_query).unwrap();
         for col in stmt.column_names() {
-            print!("{}\t", col);
+            print!("{},", col);
         }
         println!();
 
@@ -252,16 +259,16 @@ impl RQDatabase {
                     let cell = row.get::<_, rusqlite::types::Value>(ncol).unwrap();
                     match cell {
                         rusqlite::types::Value::Text(value) => {
-                            print!("\"{}\"\t", value);
+                            print!("{},", value);
                         }
                         rusqlite::types::Value::Integer(value) => {
-                            print!("{}\t", value);
+                            print!("{},", value);
                         }
                         rusqlite::types::Value::Real(value) => {
-                            print!("{}\t", value);
+                            print!("{},", value);
                         }
                         otherwise => {
-                            print!("{:?}\t", otherwise);
+                            print!("{:?},", otherwise);
                         }
                     }
                 });
