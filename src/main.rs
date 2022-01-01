@@ -1,4 +1,5 @@
 use fallible_streaming_iterator::FallibleStreamingIterator;
+use itertools::Itertools;
 use rusqlite::{self};
 use std::fmt;
 use std::io::prelude::*;
@@ -160,6 +161,7 @@ impl RQTable {
 
     fn build_table(&mut self, conn: &rusqlite::Connection) {
         let start = Instant::now();
+
         println!("Start: {:?}", start.elapsed());
         self.infer_columns();
         println!("Infer: {:?}", start.elapsed());
@@ -174,13 +176,20 @@ impl RQTable {
         let mut lines_iter = reader.lines();
         let header = lines_iter.next().unwrap().unwrap();
         conn.execute("BEGIN TRANSACTION;", []).unwrap();
-        for line in lines_iter.flatten() {
-            self.insert_row(conn, &header, line);
+        for chunk in lines_iter.flatten().into_iter().chunks(4096).into_iter() {
+            self.insert_chunk(conn, &header, chunk);
         }
         conn.execute("COMMIT;", []).unwrap();
     }
 
-    fn insert_row(&self, conn: &rusqlite::Connection, header: &str, row: String) {
+    fn insert_chunk(
+        &self,
+        conn: &rusqlite::Connection,
+        header: &str,
+        chunk: itertools::Chunk<
+            std::iter::Flatten<std::io::Lines<std::io::BufReader<std::fs::File>>>,
+        >,
+    ) {
         let mut insert_query = String::new();
         insert_query.push_str(&format!("INSERT INTO {} (", self.table_name));
         let header_split: Vec<&str> = header.split(',').collect();
@@ -190,16 +199,21 @@ impl RQTable {
                 insert_query.push(',');
             }
         }
-        insert_query.push_str(") VALUES (");
-        let row_split: Vec<&str> = row.split(',').collect();
-        for (row_pos, row_col) in row_split.iter().enumerate() {
-            insert_query.push_str(&format!("\"{}\"", row_col.replace("\"", "\"\"")));
-            if row_pos < row_split.len() - 1 {
-                insert_query.push(',');
+        insert_query.push_str(") VALUES ");
+        for row in chunk {
+            insert_query.push('(');
+            let row_split: Vec<&str> = row.split(',').collect();
+            for (row_pos, row_col) in row_split.iter().enumerate() {
+                insert_query.push_str(&format!("\"{}\"", row_col.replace("\"", "\"\"")));
+                if row_pos < row_split.len() - 1 {
+                    insert_query.push(',');
+                }
             }
+            insert_query.push_str("), ");
         }
-        insert_query.push_str(");");
-        // println!("{}", insert_query);
+        insert_query.pop();
+        insert_query.pop();
+        insert_query.push(';');
         conn.execute(&insert_query, []).unwrap();
     }
 }
@@ -291,6 +305,10 @@ fn main() {
 
     let query = &args[1];
     let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.set_prepared_statement_cache_capacity(0);
+    // let pragmas = "PRAGMA cache_size = 400000; PRAGMA synchronous = OFF; PRAGMA journal_mode = OFF; PRAGMA locking_mode = EXCLUSIVE; PRAGMA count_changes = OFF; PRAGMA temp_store = MEMORY; PRAGMA auto_vacuum = NONE;";
+
+    // conn.execute_batch(pragmas).unwrap();
 
     let database = RQDatabase::from_query(conn, query);
     database.run_query(query);
